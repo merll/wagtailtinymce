@@ -86,8 +86,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                         url = window.chooserUrls.externalLinkChooser;
                         urlParams['link_url'] = href;
                     }
-                    if( $targetNode.children().length == 0 )
-                    {
+                    if( $targetNode.children().length == 0 ) {
                         // select and replace text-only target
                         insertElement = function(elem) {
                             mceSelection.select($targetNode.get(0));
@@ -95,20 +94,27 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                         };
                     }
                     else {
-                        // replace attributes of complex target
+                        // replace old link with new link and append all childs
                         insertElement = function(elem) {
-                            mceSelection.select($targetNode.get(0));
-                            var $elem = $(elem);
-                            $targetNode.attr('href', $elem.attr('href'));
-                            if ($elem.data('linktype')) {
-                                $targetNode.data($elem.data());
-                            }
-                            else {
-                                $targetNode.removeData('linktype');
-                                $targetNode.removeAttr('data-linktype');
+                            var node = $targetNode.get(0);
+                            // remove link text node
+                            elem.removeChild(elem.firstChild);
+                            node.parentNode.insertBefore(elem, node);
+                            while (node.firstChild) {
+                                elem.appendChild(node.firstChild);
                             }
                         };
                     }
+                }
+                else if ($targetNode.context.nodeName === 'IMG') {
+                    // replace image target with a link with the image as child
+                    insertElement = function(elem) {
+                        var img = $targetNode.context;
+                        // remove link text node
+                        elem.removeChild(elem.firstChild);
+                        img.parentNode.insertBefore(elem, img);
+                        elem.appendChild(img);
+                    };
                 }
                 else {
                     if (!mceSelection.isCollapsed()) {
