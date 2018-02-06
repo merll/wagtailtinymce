@@ -5,3 +5,6 @@
 /local
 /.tx
 /translations
+/.idea
+__pycache__
+

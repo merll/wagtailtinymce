@@ -26,7 +26,7 @@
 
 import json
 
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.templatetags.static import static
 from django.utils import translation
 from django.utils.html import escape
@@ -34,8 +34,13 @@ from django.utils.html import format_html
 from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 
-from wagtail.wagtailadmin.templatetags.wagtailadmin_tags import hook_output
-from wagtail.wagtailcore import hooks
+from wagtail.admin.templatetags.wagtailadmin_tags import hook_output
+from wagtail.admin.rich_text.converters.editor_html import LinkTypeRule, WhitelistRule
+from wagtail.core.whitelist import allow_without_attributes, attribute_rule, check_url
+from wagtail.core import hooks
+from wagtail.core.rich_text.pages import PageLinkHandler
+from wagtail.images.rich_text import EditorHTMLImageConversionRule
+from wagtail.documents.rich_text import EditorHTMLDocumentLinkConversionRule
 
 
 def to_js_primitive(string):
@@ -133,3 +138,81 @@ def docs_richtexteditor_js():
         to_js_primitive(static('wagtailtinymce/js/tinymce-plugins/wagtaildoclink.js')),
         to_js_primitive(translation.to_locale(translation.get_language())),
     )
+
+
+ALLOWED_ATTR = dict.fromkeys(
+    ['border', 'cellpadding', 'cellspacing', 'style', 'width', 'colspan', 'margin-left',
+     'margin-right', 'height', 'border-color', 'text-align', 'background-color',
+     'vertical-align', 'scope', 'font-family', 'rowspan', 'valign', 'class'],
+    True)
+
+
+default_attribute_rule = attribute_rule(ALLOWED_ATTR)
+
+
+@hooks.register('register_rich_text_features')
+def register_tinymce_features(features):
+    features.register_converter_rule('tinymceeditorhtml', 'link', [
+        WhitelistRule('a', attribute_rule({'href': check_url})),
+        LinkTypeRule('page', PageLinkHandler),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'bold', [
+        WhitelistRule('b', allow_without_attributes),
+        WhitelistRule('strong', allow_without_attributes),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'br', [
+        WhitelistRule('br', allow_without_attributes),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'div', [
+        WhitelistRule('div', allow_without_attributes),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'italic', [
+        WhitelistRule('i', allow_without_attributes),
+        WhitelistRule('em', allow_without_attributes),
+    ])
+    for element in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+        features.register_converter_rule('tinymceeditorhtml', element, [
+            WhitelistRule(element, allow_without_attributes)
+        ])
+    features.register_converter_rule('tinymceeditorhtml', 'hr', [
+        WhitelistRule('hr', allow_without_attributes)
+    ])
+
+    features.register_converter_rule('tinymceeditorhtml', 'ol', [
+        WhitelistRule('ol', allow_without_attributes),
+        WhitelistRule('li', allow_without_attributes),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'ul', [
+        WhitelistRule('ul', allow_without_attributes),
+        WhitelistRule('li', allow_without_attributes),
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'p', [
+        WhitelistRule('p', allow_without_attributes)
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'subscripts', [
+        WhitelistRule('sub', allow_without_attributes),
+        WhitelistRule('sup', allow_without_attributes)
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'blockquote', [
+        WhitelistRule('blockquote', allow_without_attributes)
+    ])
+    features.register_converter_rule('tinymceeditorhtml', 'code', [
+        WhitelistRule('pre', allow_without_attributes),
+        WhitelistRule('code', allow_without_attributes)
+    ])
+
+    features.register_converter_rule('tinymceeditorhtml', 'table', [
+        WhitelistRule(element, default_attribute_rule) for element in
+        ['table', 'caption', 'tbody', 'th', 'tr', 'td']
+    ])
+
+    features.register_converter_rule('tinymceeditorhtml', 'image', EditorHTMLImageConversionRule)
+    features.register_converter_rule(
+        'tinymceeditorhtml', 'document-link', EditorHTMLDocumentLinkConversionRule
+    )
+
+    features.default_features.append('subscripts')
+    features.default_features.append('blockquote')
+    features.default_features.append('code')
+    features.default_features.append('table')
+

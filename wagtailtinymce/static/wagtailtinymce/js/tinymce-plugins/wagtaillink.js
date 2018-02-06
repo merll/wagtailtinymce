@@ -106,7 +106,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                         };
                     }
                 }
-                else if ($targetNode.context.nodeName === 'IMG') {
+                else if ($currentNode.nodeName === 'IMG') {
                     // replace image target with a link with the image as child
                     insertElement = function(elem) {
                         var img = $targetNode.context;

@@ -23,26 +23,17 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import, unicode_literals
-
 import json
 
 from django.forms import widgets
 from django.utils import translation
+from django.utils.functional import cached_property
+
+from wagtail.core.rich_text import features as feature_registry
 from wagtail.utils.widgets import WidgetWithScript
-from wagtail.wagtailadmin.edit_handlers import RichTextFieldPanel
-from wagtail.wagtailcore.rich_text import DbWhitelister
-from wagtail.wagtailcore.rich_text import expand_db_html, get_link_handler, get_embed_handler
-from wagtail.wagtailcore.whitelist import allow_without_attributes, attribute_rule, check_url
-
-
-ALLOWED_ATTR = dict.fromkeys(
-    ['border', 'cellpadding', 'cellspacing', 'style', 'width', 'colspan', 'margin-left',  'margin-right', 'height',
-     'border-color', 'text-align', 'background-color', 'vertical-align', 'scope', 'font-family', 'rowspan', 'valign'],
-    True)
-
-
-default_attribute_rule = attribute_rule(ALLOWED_ATTR)
+from wagtail.admin.edit_handlers import RichTextFieldPanel
+from wagtail.core.rich_text.rewriters import EmbedRewriter, LinkRewriter, MultiRuleRewriter
+from wagtail.admin.rich_text.converters.editor_html import DbWhitelister, EmbedTypeRule, LinkTypeRule
 
 
 class DbTinymceWhitelister(DbWhitelister):
@@ -60,50 +51,18 @@ class DbTinymceWhitelister(DbWhitelister):
       determined by the handler for that type defined in LINK_HANDLERS, while keeping the
       element content intact.
     """
-    element_rules = {
-        '[document]': allow_without_attributes,
-        'a': attribute_rule({'href': check_url}),
-        'b': allow_without_attributes,
-        'br': allow_without_attributes,
-        'div': default_attribute_rule,
-        'em': default_attribute_rule,
-        'h1': default_attribute_rule,
-        'h2': default_attribute_rule,
-        'h3': default_attribute_rule,
-        'h4': default_attribute_rule,
-        'h5': default_attribute_rule,
-        'h6': default_attribute_rule,
-        'hr': allow_without_attributes,
-        'i': allow_without_attributes,
-        'img': attribute_rule({'src': check_url, 'width': True, 'height': True,
-                               'alt': True}),
-        'li': default_attribute_rule,
-        'ol': default_attribute_rule,
-        'p': default_attribute_rule,
-        'strong': default_attribute_rule,
-        'sub': default_attribute_rule,
-        'sup': default_attribute_rule,
-        'ul': default_attribute_rule,
 
-        'blockquote': default_attribute_rule,
-        'pre': default_attribute_rule,
-        'span': default_attribute_rule,
-        'code': default_attribute_rule,
-
-        'table': default_attribute_rule,
-        'caption': default_attribute_rule,
-        'tbody': default_attribute_rule,
-        'th': default_attribute_rule,
-        'tr': default_attribute_rule,
-        'td': default_attribute_rule,
-    }
-
-    @classmethod
-    def clean_tag_node(cls, doc, tag):
+    def clean_tag_node(self, doc, tag):
         if 'data-embedtype' in tag.attrs:
             embed_type = tag['data-embedtype']
             # fetch the appropriate embed handler for this embedtype
-            embed_handler = get_embed_handler(embed_type)
+            try:
+                embed_handler = self.embed_handlers[embed_type]
+            except KeyError:
+                # discard embeds with unrecognised embedtypes
+                tag.decompose()
+                return
+
             embed_attrs = embed_handler.get_db_attributes(tag)
             embed_attrs['embedtype'] = embed_type
 
@@ -113,19 +72,68 @@ class DbTinymceWhitelister(DbWhitelister):
         elif tag.name == 'a' and 'data-linktype' in tag.attrs:
             # first, whitelist the contents of this tag
             for child in tag.contents:
-                cls.clean_node(doc, child)
+                self.clean_node(doc, child)
 
             link_type = tag['data-linktype']
-            link_handler = get_link_handler(link_type)
+            try:
+                link_handler = self.link_handlers[link_type]
+            except KeyError:
+                # discard links with unrecognised linktypes
+                tag.unwrap()
+                return
+
             link_attrs = link_handler.get_db_attributes(tag)
             link_attrs['linktype'] = link_type
             tag.attrs.clear()
             tag.attrs.update(**link_attrs)
         else:
-            super(DbWhitelister, cls).clean_tag_node(doc, tag)
+            if tag.name == 'div':
+                tag.name = 'p'
+
+            super(DbWhitelister, self).clean_tag_node(doc, tag)
+
+
+class EditorTinymceHTMLConverter:
+    def __init__(self, features=None):
+        if features is None:
+            features = feature_registry.get_default_features()
+
+        self.converter_rules = []
+        for feature in features:
+            rule = feature_registry.get_converter_rule('tinymceeditorhtml', feature)
+            if rule is not None:
+                # rule should be a list of WhitelistRule() instances - append this to
+                # the master converter_rules list
+                self.converter_rules.extend(rule)
+
+    @cached_property
+    def whitelister(self):
+        return DbTinymceWhitelister(self.converter_rules)
+
+    def to_database_format(self, html):
+        return self.whitelister.clean(html)
+
+    @cached_property
+    def html_rewriter(self):
+        embed_rules = {}
+        link_rules = {}
+        for rule in self.converter_rules:
+            if isinstance(rule, EmbedTypeRule):
+                embed_rules[rule.embed_type] = rule.handler.expand_db_attributes
+            elif isinstance(rule, LinkTypeRule):
+                link_rules[rule.link_type] = rule.handler.expand_db_attributes
+
+        return MultiRuleRewriter([
+            LinkRewriter(link_rules), EmbedRewriter(embed_rules)
+        ])
+
+    def from_database_format(self, html):
+        return self.html_rewriter(html)
 
 
 class TinyMCERichTextArea(WidgetWithScript, widgets.Textarea):
+    accepts_features = True
+
     @classmethod
     def getDefaultArgs(cls):
         return {
@@ -151,10 +159,21 @@ class TinyMCERichTextArea(WidgetWithScript, widgets.Textarea):
         }
 
     def __init__(self, attrs=None, **kwargs):
-        super(TinyMCERichTextArea, self).__init__(attrs)
+        self.options = kwargs.pop('options', None)
+
+        self.features = kwargs.pop('features', None)
+        if self.features is None:
+            self.features = feature_registry.get_default_features()
+
+        self.converter = EditorTinymceHTMLConverter(self.features)
+
         self.kwargs = self.getDefaultArgs()
         if kwargs is not None:
             self.kwargs.update(kwargs)
+        if self.options is not None:
+            self.kwargs.update(self.options)
+
+        super().__init__(attrs)
 
     def get_panel(self):
         return RichTextFieldPanel
@@ -163,8 +182,8 @@ class TinyMCERichTextArea(WidgetWithScript, widgets.Textarea):
         if value is None:
             translated_value = None
         else:
-            translated_value = expand_db_html(value, for_editor=True)
-        return super(TinyMCERichTextArea, self).render(name, translated_value, attrs)
+            translated_value = self.converter.from_database_format(value)
+        return super().render(name, translated_value, attrs)
 
     def render_js_init(self, id_, name, value):
         options = self.kwargs.get('options')
@@ -197,8 +216,8 @@ class TinyMCERichTextArea(WidgetWithScript, widgets.Textarea):
         return "makeTinyMCEEditable({0}, {1});".format(json.dumps(id_), json.dumps(kwargs))
 
     def value_from_datadict(self, data, files, name):
-        original_value = super(TinyMCERichTextArea,
-                               self).value_from_datadict(data, files, name)
+        original_value = super().value_from_datadict(data, files, name)
         if original_value is None:
             return None
-        return DbTinymceWhitelister.clean(original_value)
+        return self.converter.to_database_format(original_value)
+
