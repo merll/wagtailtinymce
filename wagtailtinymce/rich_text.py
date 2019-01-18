@@ -178,12 +178,12 @@ class TinyMCERichTextArea(WidgetWithScript, widgets.Textarea):
     def get_panel(self):
         return RichTextFieldPanel
 
-    def render(self, name, value, attrs=None):
+    def render(self, name, value, attrs=None, renderer=None):
         if value is None:
             translated_value = None
         else:
             translated_value = self.converter.from_database_format(value)
-        return super().render(name, translated_value, attrs)
+        return super().render(name, translated_value, attrs, renderer)
 
     def render_js_init(self, id_, name, value):
         options = self.kwargs.get('options')
