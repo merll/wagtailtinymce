@@ -77,6 +77,10 @@ def insert_editor_js():
         'wagtailtinymce/js/vendor/tinymce/jquery.tinymce.min.js',
         'wagtailtinymce/js/vendor/tinymce/tinymce.min.js',
         'wagtailtinymce/js/tinymce-editor.js',
+        'wagtailadmin/js/page-chooser-modal.js',
+        'wagtailimages/js/image-chooser-modal.js',
+        'wagtaildocs/js/document-chooser-modal.js',
+        'wagtailembeds/js/embed-chooser-modal.js',
     ]
     js_includes = format_html_join(
         '\n',
