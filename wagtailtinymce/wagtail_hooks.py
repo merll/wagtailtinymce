@@ -39,8 +39,8 @@ from wagtail.admin.rich_text.converters.editor_html import LinkTypeRule, Whiteli
 from wagtail.core.whitelist import allow_without_attributes, attribute_rule, check_url
 from wagtail.core import hooks
 from wagtail.core.rich_text.pages import PageLinkHandler
-from wagtail.images.rich_text import EditorHTMLImageConversionRule
-from wagtail.documents.rich_text import EditorHTMLDocumentLinkConversionRule
+from wagtail.images.rich_text.editor_html import EditorHTMLImageConversionRule
+from wagtail.documents.rich_text.editor_html import EditorHTMLDocumentLinkConversionRule
 
 
 def to_js_primitive(string):
